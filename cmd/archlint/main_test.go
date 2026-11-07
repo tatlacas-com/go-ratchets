@@ -6,13 +6,50 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tatlacas-com/go-ratchets/internal/archlint"
+	"github.com/tatlacas-com/go-ratchets/internal/config"
 )
+
+const (
+	defaultBaseline = config.DefaultImportsBaseline
+	baselineHeader  = archlint.BaselineHeader
+)
+
+var (
+	run   = archlint.Run
+	match = archlint.Match
+)
+
+// repoConfig holds the layering rules the fixtures are checked against.
+const repoConfig = `rules:
+  - name: internal-imports-cmd
+    from: [internal/...]
+    forbid: [cmd/...]
+    why: no package under internal/ imports cmd/...
+  - name: core-imports-daemon
+    forbid: [internal/daemon]
+    except: [internal/daemon/..., cmd/...]
+    why: only internal/daemon/... and cmd/... import internal/daemon
+  - name: imports-vendor-adapter
+    forbid: [internal/adapter/*/...]
+    except: [internal/daemon/...]
+    neutral: [internal/adapter/protocol/...]
+    own_tree: true
+    why: vendor adapters are imported only by the daemon's wiring and their own tree
+`
 
 const fixtureModule = "example.com/fix"
 
 func writeTree(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
+	if files == nil {
+		files = map[string]string{}
+	}
+	if _, own := files[config.FileName]; !own {
+		files[config.FileName] = repoConfig
+	}
 	for name, body := range files {
 		path := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
