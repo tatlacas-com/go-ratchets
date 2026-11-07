@@ -228,6 +228,30 @@ func TestRun_BaselinePathOutsideRootIsRefused(t *testing.T) {
 	}
 }
 
+func TestRun_BaselineSymlinkThenDotDotUsesTheValidatedPath(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.Mkdir(filepath.Join(outside, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	root := writeTree(t, map[string]string{
+		config.FileName: "baselines: { size: link/../victim }\n",
+		"victim":        "file p/gone.go - 900\n",
+		"p/p.go":        goSource(10, "F", 2),
+	})
+	if err := os.Symlink(filepath.Join(outside, "sub"), filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runIn(t, root, "-tighten"); code != 0 {
+		t.Fatalf("tighten exit %d; stderr:\n%s", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "victim")); err == nil {
+		t.Fatal("tighten wrote outside the repo root")
+	}
+	if got := readFile(t, filepath.Join(root, "victim")); got != baselineHeader {
+		t.Errorf("baseline = %q, want header only", got)
+	}
+}
+
 func TestRun_TightenRefusesNewItems(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		defaultBaseline: "",

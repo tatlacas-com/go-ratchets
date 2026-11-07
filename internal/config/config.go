@@ -140,7 +140,8 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Resolve returns path as is when absolute, else joined to root, and refuses
+// Resolve returns the canonical form (cleaned, symlinks resolved) of path, absolute
+// or joined to root, and refuses
 // a result that lies outside root, whether by "..", an absolute path or a
 // symlink, so a config cannot make the ratchets read or overwrite files
 // elsewhere.
@@ -168,7 +169,7 @@ func Resolve(root, path string) (string, error) {
 	if rel, err := filepath.Rel(realRoot, real); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("baseline path %q is outside the repo root", path)
 	}
-	return full, nil
+	return real, nil
 }
 
 // evalExisting resolves symlinks in the longest existing prefix of path and
