@@ -6,11 +6,31 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tatlacas-com/go-ratchets/internal/config"
+	"github.com/tatlacas-com/go-ratchets/internal/sizelint"
 )
+
+const (
+	defaultBaseline = config.DefaultSizeBaseline
+	baselineHeader  = sizelint.BaselineHeader
+)
+
+var (
+	run        = sizelint.Run
+	countLines = sizelint.CountLines
+)
+
+// repoConfig is the .ratchets.yml the fixtures share: the script dirs the
+// tests below put scripts under.
+const repoConfig = "script_dirs: [.fompiler, internal/daemon/bundle/teammates]\n"
 
 func writeTree(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
+	if _, own := files[config.FileName]; !own {
+		files[config.FileName] = repoConfig
+	}
 	for name, body := range files {
 		path := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

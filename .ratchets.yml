@@ -1,0 +1,6 @@
+# go-ratchets' own ratchets; the defaults suit it, so only the baselines are
+# spelled out.
+limits: { file: 800, func: 80, script: 100 }
+baselines:
+  size: .ratchets/sizelint-baseline.txt
+  imports: .ratchets/archlint-baseline.txt

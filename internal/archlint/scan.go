@@ -1,4 +1,4 @@
-package main
+package archlint
 
 import (
 	"errors"
@@ -15,15 +15,17 @@ import (
 	"golang.org/x/mod/module"
 )
 
-// edge is one direct import between two packages of the module, both as
-// paths relative to the module root.
+// edge is one direct import from a package of the module, as a path relative
+// to the module root, to another package of it (also relative) or to a
+// third-party package (its full import path).
 type edge struct {
 	importer string
 	imported string
 }
 
 // scan returns every direct import from a production Go file of the module at
-// root to another package of the same module. As for the go tool, testdata,
+// root to another package of the same module or to a third-party package;
+// standard library imports are left out. As for the go tool, testdata,
 // vendor and directories starting with "." or "_" are skipped, and so are
 // nested modules, whose packages are not part of this one.
 func scan(root string) (map[edge]bool, error) {
@@ -82,6 +84,8 @@ func addImports(root, modPath, path string, edges map[edge]bool) error {
 		}
 		if rel, ok := strings.CutPrefix(imported, modPath+"/"); ok {
 			edges[edge{importer: importer, imported: rel}] = true
+		} else if first, _, _ := strings.Cut(imported, "/"); strings.Contains(first, ".") {
+			edges[edge{importer: importer, imported: imported}] = true
 		}
 	}
 	return nil
