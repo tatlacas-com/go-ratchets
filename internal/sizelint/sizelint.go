@@ -32,6 +32,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -177,17 +178,19 @@ func load(root string, cfg *config.Config, baselinePath string) (baseline, found
 // the current size of each item still over its limit.
 func compare(lim config.Limits, baseline, found map[item]int) (problems, stale []string, tightened map[item]int) {
 	tightened = map[item]int{}
-	for _, it := range sortedItems(baseline) {
-		if _, exists := found[it]; !exists {
-			stale = append(stale, fmt.Sprintf("%s: baselined but no longer found", it.baselineKey()))
-		}
-	}
+	moved := map[item]bool{}
 	for _, it := range sortedItems(found) {
 		size, limit := found[it], limitOf(lim, it.kind)
 		if size <= limit {
 			continue
 		}
 		allowed, listed := baseline[it]
+		if !listed {
+			var from item
+			if from, allowed, listed = movedFrom(it, baseline, found, moved); listed {
+				moved[from] = true
+			}
+		}
 		switch {
 		case !listed:
 			problems = append(problems, fmt.Sprintf(
@@ -201,7 +204,33 @@ func compare(lim config.Limits, baseline, found map[item]int) (problems, stale [
 			tightened[it] = size
 		}
 	}
+	for _, it := range sortedItems(baseline) {
+		if _, exists := found[it]; !exists && !moved[it] {
+			stale = append(stale, fmt.Sprintf("%s: baselined but no longer found", it.baselineKey()))
+		}
+	}
 	return problems, stale, tightened
+}
+
+// movedFrom finds the baseline entry a function moved from: the same function
+// name under another file of the same directory, whose file no longer has it
+// and which no other function has claimed. The moved function inherits that
+// entry's allowance.
+func movedFrom(it item, baseline, found map[item]int, claimed map[item]bool) (item, int, bool) {
+	if it.kind != goFunc {
+		return item{}, 0, false
+	}
+	dir := path.Dir(it.path)
+	for _, old := range sortedItems(baseline) {
+		if old.kind != goFunc || old.fn != it.fn || old.path == it.path || path.Dir(old.path) != dir || claimed[old] {
+			continue
+		}
+		if _, still := found[old]; still {
+			continue
+		}
+		return old, baseline[old], true
+	}
+	return item{}, 0, false
 }
 
 func countSame(baseline, tightened map[item]int) int {
