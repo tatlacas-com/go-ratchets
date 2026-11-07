@@ -1,0 +1,4 @@
+# Files, functions and pipeline scripts over their size limit that predate
+# sizelint (D74), as "<kind> <path> <func or -> <lines>". This list may only
+# shrink: split an item instead of growing it, and after shrinking items run
+#   go run ./internal/sizelint -tighten
