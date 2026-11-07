@@ -104,14 +104,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *baselinePath == "" {
-		*baselinePath = config.Resolve(*root, cfg.Baselines.Size)
+		if *baselinePath, err = config.Resolve(*root, cfg.Baselines.Size); err != nil {
+			_, _ = fmt.Fprintln(stderr, "sizelint:", err)
+			return 2
+		}
 	}
 	baseline, found, err := load(*root, &cfg, *baselinePath)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "sizelint:", err)
 		return 2
 	}
-	problems, tightened := compare(cfg.Limits, baseline, found)
+	problems, stale, tightened := compare(cfg.Limits, baseline, found)
 	for _, problem := range problems {
 		_, _ = fmt.Fprintln(stderr, problem)
 	}
@@ -119,6 +122,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if *tighten {
 			_, _ = fmt.Fprintln(stderr, "sizelint: refusing to tighten a baseline that would grow")
 		}
+		return 1
+	}
+	if len(stale) > 0 && !*tighten {
+		for _, problem := range stale {
+			_, _ = fmt.Fprintln(stderr, problem)
+		}
+		_, _ = fmt.Fprintln(stderr, "sizelint: run `sizelint -tighten` to drop vanished items from the baseline")
 		return 1
 	}
 	if !*tighten {
@@ -136,15 +146,20 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 // Check returns a problem for every item over its limit that is not
-// baselined or has grown past its baseline. Baselined items that shrank or
-// went are not problems; Run only hints at -tighten for them.
+// baselined or has grown past its baseline, and for every baseline entry whose
+// file, function or script no longer exists. Baselined items that merely
+// shrank are not problems; Run only hints at -tighten for them.
 func Check(root string, cfg *config.Config) ([]string, error) {
-	baseline, found, err := load(root, cfg, config.Resolve(root, cfg.Baselines.Size))
+	path, err := config.Resolve(root, cfg.Baselines.Size)
 	if err != nil {
 		return nil, err
 	}
-	problems, _ := compare(cfg.Limits, baseline, found)
-	return problems, nil
+	baseline, found, err := load(root, cfg, path)
+	if err != nil {
+		return nil, err
+	}
+	problems, stale, _ := compare(cfg.Limits, baseline, found)
+	return append(problems, stale...), nil
 }
 
 func load(root string, cfg *config.Config, baselinePath string) (baseline, found map[item]int, err error) {
@@ -157,10 +172,16 @@ func load(root string, cfg *config.Config, baselinePath string) (baseline, found
 	return baseline, found, nil
 }
 
-// compare returns a problem per item over its limit and its baseline, and the
-// baseline tightened to the current size of each item still over its limit.
-func compare(lim config.Limits, baseline, found map[item]int) (problems []string, tightened map[item]int) {
+// compare returns a problem per item over its limit and its baseline, a stale
+// entry per baseline item that no longer exists, and the baseline tightened to
+// the current size of each item still over its limit.
+func compare(lim config.Limits, baseline, found map[item]int) (problems, stale []string, tightened map[item]int) {
 	tightened = map[item]int{}
+	for _, it := range sortedItems(baseline) {
+		if _, exists := found[it]; !exists {
+			stale = append(stale, fmt.Sprintf("%s: baselined but no longer found", it.baselineKey()))
+		}
+	}
 	for _, it := range sortedItems(found) {
 		size, limit := found[it], limitOf(lim, it.kind)
 		if size <= limit {
@@ -180,7 +201,7 @@ func compare(lim config.Limits, baseline, found map[item]int) (problems []string
 			tightened[it] = size
 		}
 	}
-	return problems, tightened
+	return problems, stale, tightened
 }
 
 func countSame(baseline, tightened map[item]int) int {

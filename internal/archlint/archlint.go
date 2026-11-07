@@ -62,7 +62,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *baselinePath == "" {
-		*baselinePath = config.Resolve(*root, cfg.Baselines.Imports)
+		if *baselinePath, err = config.Resolve(*root, cfg.Baselines.Imports); err != nil {
+			_, _ = fmt.Fprintln(stderr, "archlint:", err)
+			return 2
+		}
 	}
 	found, fresh, stale, err := evaluate(*root, &cfg, *baselinePath)
 	if err != nil {
@@ -99,7 +102,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // Check returns a problem for every violation not in the baseline and for
 // every baseline entry that no longer occurs.
 func Check(root string, cfg *config.Config) ([]string, error) {
-	_, fresh, stale, err := evaluate(root, cfg, config.Resolve(root, cfg.Baselines.Imports))
+	path, err := config.Resolve(root, cfg.Baselines.Imports)
+	if err != nil {
+		return nil, err
+	}
+	_, fresh, stale, err := evaluate(root, cfg, path)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +148,7 @@ func check(cfg *config.Config, edges map[edge]bool) []violation {
 	var found []violation
 	for e := range edges {
 		for i := range cfg.Rules {
-			if r := &cfg.Rules[i]; violates(r, e.importer, e.imported) {
+			if r := &cfg.Rules[i]; violates(r, e.importer, e.imported, e.local) {
 				found = append(found, violation{rule: r.Name, importer: e.importer, imported: e.imported})
 			}
 		}

@@ -7,13 +7,13 @@ import (
 )
 
 // violates reports whether importer importing imported breaks r. Importer
-// is a module-relative package path; imported is either one, or, for a
+// is a module-relative package path; imported is either one (local), or, for a
 // third-party package, its full import path.
-func violates(r *config.Rule, importer, imported string) bool {
+func violates(r *config.Rule, importer, imported string, local bool) bool {
 	if len(r.From) > 0 && !matchesAny(r.From, importer) {
 		return false
 	}
-	pat, ok := forbids(r.Forbid, imported)
+	pat, ok := forbids(r.Forbid, imported, local)
 	if !ok || matchesAny(r.Except, importer) || matchesAny(r.Neutral, imported) {
 		return false
 	}
@@ -30,17 +30,21 @@ func violates(r *config.Rule, importer, imported string) bool {
 // rather than a module-local package: its first element contains a dot.
 func isThirdParty(pattern string) bool {
 	first, _, _ := strings.Cut(pattern, "/")
-	return strings.Contains(first, ".")
+	return first != "..." && strings.Contains(first, ".")
 }
 
 // forbids reports whether imported matches any forbid pattern, returning the
-// first module-local pattern that matched.
-func forbids(patterns []string, imported string) (matched *string, ok bool) {
+// first module-local pattern that matched. Import-path prefixes apply only to
+// third-party imports and module-local patterns only to local ones.
+func forbids(patterns []string, imported string, local bool) (matched *string, ok bool) {
 	for i, p := range patterns {
 		if isThirdParty(p) {
-			if hasPathPrefix(imported, p) {
+			if !local && hasPathPrefix(imported, p) {
 				return nil, true
 			}
+			continue
+		}
+		if !local {
 			continue
 		}
 		if _, hit := match(p, imported); hit {

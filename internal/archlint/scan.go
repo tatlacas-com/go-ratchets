@@ -21,6 +21,7 @@ import (
 type edge struct {
 	importer string
 	imported string
+	local    bool
 }
 
 // scan returns every direct import from a production Go file of the module at
@@ -83,7 +84,7 @@ func addImports(root, modPath, path string, edges map[edge]bool) error {
 			return fmt.Errorf("%s: import %s: %w", path, spec.Path.Value, err)
 		}
 		if rel, ok := strings.CutPrefix(imported, modPath+"/"); ok {
-			edges[edge{importer: importer, imported: rel}] = true
+			edges[edge{importer: importer, imported: rel, local: true}] = true
 		} else if first, _, _ := strings.Cut(imported, "/"); strings.Contains(first, ".") {
 			edges[edge{importer: importer, imported: imported}] = true
 		}

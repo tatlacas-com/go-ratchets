@@ -140,12 +140,59 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Resolve returns path as is when absolute, else joined to root.
-func Resolve(root, path string) string {
-	if filepath.IsAbs(path) {
-		return path
+// Resolve returns path as is when absolute, else joined to root, and refuses
+// a result that lies outside root, whether by "..", an absolute path or a
+// symlink, so a config cannot make the ratchets read or overwrite files
+// elsewhere.
+func Resolve(root, path string) (string, error) {
+	full := path
+	if !filepath.IsAbs(path) {
+		full = filepath.Join(root, filepath.FromSlash(path))
 	}
-	return filepath.Join(root, filepath.FromSlash(path))
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	realRoot, err = filepath.Abs(realRoot)
+	if err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(full)
+	if err != nil {
+		return "", err
+	}
+	real, err := evalExisting(abs)
+	if err != nil {
+		return "", err
+	}
+	if rel, err := filepath.Rel(realRoot, real); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("baseline path %q is outside the repo root", path)
+	}
+	return full, nil
+}
+
+// evalExisting resolves symlinks in the longest existing prefix of path and
+// appends the rest, so a file yet to be written is still placed correctly.
+func evalExisting(path string) (string, error) {
+	var rest []string
+	for p := path; ; {
+		real, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			return filepath.Join(append([]string{real}, rest...)...), nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+		if _, lerr := os.Lstat(p); lerr == nil {
+			return "", fmt.Errorf("%s: dangling symlink", p)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return "", err
+		}
+		rest = append([]string{filepath.Base(p)}, rest...)
+		p = parent
+	}
 }
 
 // Rule returns the rule called name.

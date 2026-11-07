@@ -154,7 +154,7 @@ func TestRun_BaselinedGrownFails(t *testing.T) {
 
 func TestRun_ShrunkPassesAndTightenShrinksAndDrops(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		defaultBaseline:  "file p/p.go - 900\nfunc p/p.go F 90\nfunc p/gone.go G 90\nscript .fompiler/x.sh - 120\n",
+		defaultBaseline:  "file p/p.go - 900\nfunc p/p.go F 90\nscript .fompiler/x.sh - 120\n",
 		"p/p.go":         goSource(850, "F", 80),
 		".fompiler/x.sh": script(100),
 	})
@@ -162,7 +162,7 @@ func TestRun_ShrunkPassesAndTightenShrinksAndDrops(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d, want 0; stderr:\n%s", code, stderr)
 	}
-	if !strings.Contains(stdout, "4 baselined items shrank or went") {
+	if !strings.Contains(stdout, "3 baselined items shrank or went") {
 		t.Errorf("stdout lacks the tighten hint:\n%s", stdout)
 	}
 	if code, _, stderr := runIn(t, root, "-tighten"); code != 0 {
@@ -174,6 +174,57 @@ func TestRun_ShrunkPassesAndTightenShrinksAndDrops(t *testing.T) {
 	}
 	if code, stdout, stderr := runIn(t, root); code != 0 || stdout != "" {
 		t.Fatalf("after tighten: exit %d, stdout %q; stderr:\n%s", code, stdout, stderr)
+	}
+}
+
+func TestRun_StaleBaselineEntryFailsUntilTightened(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		defaultBaseline: "file p/gone.go - 900\nfile p/p.go - 850\n",
+		"p/p.go":        goSource(850, "F", 2),
+	})
+	code, _, stderr := runIn(t, root)
+	if code != 1 || !strings.Contains(stderr, "file p/gone.go -: baselined but no longer found") {
+		t.Fatalf("exit %d, want 1 naming the stale entry; stderr:\n%s", code, stderr)
+	}
+	if code, _, stderr := runIn(t, root, "-tighten"); code != 0 {
+		t.Fatalf("tighten exit %d; stderr:\n%s", code, stderr)
+	}
+	want := baselineHeader + "file p/p.go - 850\n"
+	if got := readFile(t, filepath.Join(root, defaultBaseline)); got != want {
+		t.Errorf("baseline =\n%s\nwant\n%s", got, want)
+	}
+	if code, _, stderr := runIn(t, root); code != 0 {
+		t.Fatalf("after tighten: exit %d; stderr:\n%s", code, stderr)
+	}
+}
+
+func TestRun_BaselinePathOutsideRootIsRefused(t *testing.T) {
+	outside := t.TempDir()
+	target := filepath.Join(outside, "victim.txt")
+	if err := os.WriteFile(target, []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := "baselines: { size: link/b.txt }\n"
+	for name, cfg := range map[string]string{
+		"dotdot":   "baselines: { size: ../victim.txt }\n",
+		"absolute": "baselines: { size: " + target + " }\n",
+		"symlink":  link,
+	} {
+		root := writeTree(t, map[string]string{config.FileName: cfg, "p/p.go": goSource(10, "F", 2)})
+		if name == "symlink" {
+			if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, args := range [][]string{nil, {"-tighten"}} {
+			code, _, stderr := runIn(t, root, args...)
+			if code != 2 || !strings.Contains(stderr, "outside the repo root") {
+				t.Errorf("%s %v: exit %d, want 2 outside the repo root; stderr:\n%s", name, args, code, stderr)
+			}
+		}
+	}
+	if got := readFile(t, target); got != "secret\n" {
+		t.Errorf("outside file rewritten to %q", got)
 	}
 }
 

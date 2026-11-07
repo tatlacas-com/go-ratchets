@@ -167,3 +167,56 @@ func TestCheck_ThisRepoPassesItsOwnRatchets(t *testing.T) {
 		t.Fatalf("problems:\n%s", strings.Join(problems, "\n"))
 	}
 }
+
+func TestCheck_ThirdPartyForbidDoesNotFlagLocalOrTreeWildcardMisclassified(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"go.mod": goMod,
+		".ratchets.yml": `rules:
+  - name: no-cmd-tree
+    from: [internal/...]
+    forbid: [...]
+    why: nothing local
+  - name: no-web
+    forbid: [web/...]
+    why: web is off limits
+`,
+		".ratchets/sizelint-baseline.txt": "",
+		".ratchets/archlint-baseline.txt": "",
+		"internal/a/a.go":                 "package a\n\nimport (\n\t_ \"example.com/fix/other\"\n\t_ \"github.com/gin-gonic/gin\"\n)\n",
+		"other/o.go":                      "package other\n",
+	})
+	problems := strings.Join(check(t, root), "\n")
+	if !strings.Contains(problems, "no-cmd-tree: internal/a imports other") {
+		t.Errorf("the ... pattern must forbid local imports:\n%s", problems)
+	}
+	if strings.Contains(problems, "gin") || strings.Contains(problems, "no-web") {
+		t.Errorf("a module-local pattern flagged a third-party import:\n%s", problems)
+	}
+}
+
+func TestCheck_StaleSizeBaselineEntryFails(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"go.mod":                          goMod,
+		".ratchets/sizelint-baseline.txt": "file p/deleted.go - 900\n",
+		".ratchets/archlint-baseline.txt": "",
+		"p/p.go":                          goFile(5),
+	})
+	problems := strings.Join(check(t, root), "\n")
+	if !strings.Contains(problems, "file p/deleted.go -: baselined but no longer found") {
+		t.Errorf("problems lack the stale entry:\n%s", problems)
+	}
+}
+
+func TestCheck_BaselinePathOutsideRootIsRefused(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"go.mod":        goMod,
+		".ratchets.yml": "baselines: { size: ../escape.txt }\n",
+	})
+	cfg, err := ratchets.LoadConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ratchets.Check(root, cfg); err == nil || !strings.Contains(err.Error(), "outside the repo root") {
+		t.Fatalf("err = %v, want outside the repo root", err)
+	}
+}
