@@ -12,15 +12,16 @@ concurrency:
 
 jobs:
   test:
-    runs-on: [self-hosted, fedora-self-hosted]
+    # Public repo: GitHub-hosted runners only. Org self-hosted runners do not
+    # serve public repos, and a fork PR must never run on our hosts.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          # The self-hosted disk keeps Go caches between jobs; saving them to the
-          # Actions cache tars the whole shared cache (an hour per job).
-          cache: false
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
